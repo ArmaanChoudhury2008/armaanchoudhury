@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Armaan's Voice Command Launcher</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #6366f1; /* Indigo 500 */
+            --secondary-color: #f59e0b; /* Amber 500 */
+            --background-color: #1f2937; /* Gray 800 */
+            --card-bg-color: #374151; /* Gray 700 */
+            --text-color: #f3f4f6; /* Gray 100 */
+            --accent-color: #10b981; /* Emerald 500 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            transition: all 0.3s;
+        }
+        .app-card {
+            background-color: var(--card-bg-color);
+            border: 1px solid #4b5563;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .app-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
+        }
+        .mic-button {
+            transition: all 0.3s ease;
+        }
+        .mic-button.listening {
+            animation: pulse-red 1s infinite;
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+        }
+        @keyframes pulse-red {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+            }
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+        /* Calculator Styling */
+        .calculator-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 0.5rem;
+        }
+        .calc-btn {
+            background-color: var(--card-bg-color);
+            color: var(--text-color);
+            padding: 0.75rem 0;
+            border-radius: 0.5rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            transition: background-color 0.1s;
+        }
+        .calc-btn:hover {
+            background-color: #4b5563;
+        }
+        .calc-op {
+            background-color: var(--secondary-color);
+            color: #1f2937;
+        }
+        .calc-op:hover {
+            background-color: #d97706;
+        }
+        .calc-accent {
+            background-color: var(--accent-color);
+            color: #1f2937;
+        }
+        .calc-accent:hover {
+            background-color: #059669;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8">
+
+    <div id="app-container" class="max-w-4xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-white mb-2">Armaan's Voice Command Launcher</h1>
+            <p class="text-lg text-gray-400">Speak your command or select an app below.</p>
+        </header>
+
+        <main class="bg-gray-800 p-6 rounded-xl shadow-2xl min-h-[600px] flex flex-col">
+            
+            <div class="text-center mb-6">
+                <button id="mic-btn" class="mic-button p-4 rounded-full bg-red-600 text-white shadow-lg focus:outline-none focus:ring-4 focus:ring-red-500 focus:ring-opacity-50" title="Start Listening">
+                    <i class="fas fa-microphone text-3xl"></i>
+                </button>
+                <div id="mic-status" class="mt-3 text-sm font-semibold text-red-400">
+                    Click to start listening...
+                </div>
+                <div id="mic-result" class="mt-2 text-xl font-bold text-white min-h-[30px] transition-opacity duration-300"></div>
+            </div>
+
+            <div id="app-content" class="flex-grow flex items-center justify-center p-4">
+                </div>
+            
+            <div class="mt-6 p-3 bg-red-900 bg-opacity-30 border border-red-700 rounded-lg text-sm text-red-300">
+                <i class="fas fa-shield-alt mr-2"></i>
+                **Security Notice:** This web app cannot access or control native applications (like opening your local Chrome or launching your desktop Spotify app) due to web browser security restrictions. Commands are either **simulated** (Calculator, Notes) or **redirect to external websites** (YouTube, WhatsApp, etc.).
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById('mic-btn');
+        const micStatus = document.getElementById('mic-status');
+        const micResult = document.getElementById('mic-result');
+        const appContent = document.getElementById('app-content');
+        
+        // --- State Management ---
+        let recognition = null;
+        let currentApp = 'home';
+        const APP_COMMANDS = {
+            'home': 'show home',
+            'calculator': 'launch calculator',
+            'notes': 'open notes',
+            'weather': 'show weather',
+            'whatsapp': 'open whatsapp',
+            'youtube': 'open youtube',
+            'instagram': 'open instagram',
+            'gmail': 'open mail',
+            'amazon': 'open amazon' // ADDED: New command for Amazon
+        };
+
+        // --- Firebase/Auth/Data Setup (Required for persistence in the future, currently using sessionStorage) ---
+        // NOTE: Firestore is required for multi-player/persistent storage, but for a single-user note, we use sessionStorage for simplicity.
+        const STORAGE_KEY_NOTES = 'voice_launcher_notes';
+        let calculatorDisplayValue = '0';
+        let calculatorExpression = '';
+        
+        // --- Core Speech Recognition Logic ---
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            recognition.onstart = () => {
+                micBtn.classList.add('listening', 'bg-red-400');
+                micStatus.textContent = 'Listening... Say a command.';
+                micResult.textContent = '';
+            };
+
+            recognition.onend = () => {
+                micBtn.classList.remove('listening', 'bg-red-400');
+                micStatus.textContent = 'Click to start listening...';
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript.toLowerCase().trim();
+                micResult.textContent = `You said: "${transcript}"`;
+                handleCommand(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                micStatus.textContent = `Error: ${event.error}. Click to retry.`;
+                console.error('Speech Recognition Error:', event.error);
+                // Handle no-speech case
+                if (event.error === 'no-speech') {
+                    micResult.textContent = 'No speech detected. Please try again.';
+                } else if (event.error === 'not-allowed') {
+                    micStatus.textContent = 'Microphone access denied. Please allow permission.';
+                }
+            };
+
+            micBtn.addEventListener('click', () => {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error("Recognition start failed, possibly already listening:", e);
+                    micStatus.textContent = 'Already listening. Please wait or click to stop.';
+                }
+            });
+            
+        } else {
+            micBtn.disabled = true;
+            micStatus.textContent = 'Speech Recognition not supported in this browser.';
+        }
+
+        // --- Command Handler ---
+
+        function handleCommand(transcript) {
+            let commandFound = false;
+
+            // Check for specific app commands
+            for (const appKey in APP_COMMANDS) {
+                const commandString = APP_COMMANDS[appKey];
+                if (transcript.includes(commandString) || transcript.includes(appKey)) {
+                    if (appKey === 'whatsapp' || appKey === 'youtube' || appKey === 'instagram' || appKey === 'gmail' || appKey === 'weather' || appKey === 'amazon') { // UPDATED: Included 'amazon' here
+                        openExternalApp(appKey);
+                    } else {
+                        renderApp(appKey);
+                    }
+                    commandFound = true;
+                    break;
+                }
+            }
+
+            if (!commandFound) {
+                // If a specific command wasn't found, check for a generic "close/go home" command
+                if (transcript.includes('go home') || transcript.includes('close app') || transcript.includes('show main screen')) {
+                    renderApp('home');
+                    commandFound = true;
+                }
+            }
+
+            if (!commandFound) {
+                micResult.textContent = `Command not recognized: "${transcript}". Try "Launch Calculator" or "Show Home".`;
+            }
+        }
+
+        // --- External App Launcher ---
+
+        function openExternalApp(appKey) {
+            let url = '';
+            let appName = '';
+            switch (appKey) {
+                case 'whatsapp':
+                    url = 'https://web.whatsapp.com/';
+                    appName = 'WhatsApp Web';
+                    break;
+                case 'youtube':
+                    url = 'https://www.youtube.com/';
+                    appName = 'YouTube';
+                    break;
+                case 'instagram':
+                    url = 'https://www.instagram.com/';
+                    appName = 'Instagram';
+                    break;
+                case 'gmail':
+                    url = 'https://mail.google.com/';
+                    appName = 'Gmail Login Page';
+                    break;
+                case 'weather':
+                    url = 'https://www.accuweather.com/';
+                    appName = 'AccuWeather';
+                    break;
+                case 'amazon': // ADDED: New case for Amazon
+                    url = 'https://www.amazon.in/';
+                    appName = 'Amazon India';
+                    break;
+                default:
+                    return;
+            }
+            
+            // Open in new tab
+            window.open(url, '_blank');
+            micResult.textContent = `Launched "${appName}" in a new tab.`;
+            renderApp('home'); // Go back to home view
+        }
+
+        // --- App Renderer ---
+
+        function renderApp(appName) {
+            currentApp = appName;
+            appContent.innerHTML = ''; // Clear previous content
+
+            switch (appName) {
+                case 'calculator':
+                    renderCalculator();
+                    break;
+                case 'notes':
+                    renderNotes();
+                    break;
+                case 'home':
+                default:
+                    renderHome();
+                    break;
+            }
+        }
+        
+        // --- Home Screen Renderer ---
+
+        function renderHome() {
+            appContent.innerHTML = `
+                <div class="w-full">
+                    <h2 class="text-3xl font-bold text-center mb-6 text-indigo-400">Available Voice Commands</h2>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-6">
+                        
+                        <div id="card-calculator" class="app-card p-6 rounded-lg text-center" onclick="renderApp('calculator')">
+                            <i class="fas fa-calculator text-5xl text-accent-color mb-3"></i>
+                            <p class="text-xl font-semibold">Scientific Calculator</p>
+                            <span class="text-sm text-gray-400">"Launch Calculator"</span>
+                        </div>
+                        <div id="card-notes" class="app-card p-6 rounded-lg text-center" onclick="renderApp('notes')">
+                            <i class="fas fa-sticky-note text-5xl text-yellow-500 mb-3"></i>
+                            <p class="text-xl font-semibold">Notes App</p>
+                            <span class="text-sm text-gray-400">"Open Notes"</span>
+                        </div>
+
+                        <div id="card-weather" class="app-card p-6 rounded-lg text-center" onclick="openExternalApp('weather')">
+                            <i class="fas fa-cloud-sun text-5xl text-blue-400 mb-3"></i>
+                            <p class="text-xl font-semibold">AccuWeather</p>
+                            <span class="text-sm text-gray-400">"Show Weather"</span>
+                        </div>
+                        <div id="card-whatsapp" class="app-card p-6 rounded-lg text-center" onclick="openExternalApp('whatsapp')">
+                            <i class="fab fa-whatsapp text-5xl text-green-500 mb-3"></i>
+                            <p class="text-xl font-semibold">WhatsApp Web</p>
+                            <span class="text-sm text-gray-400">"Open WhatsApp"</span>
+                        </div>
+                        <div id="card-youtube" class="app-card p-6 rounded-lg text-center" onclick="openExternalApp('youtube')">
+                            <i class="fab fa-youtube text-5xl text-red-600 mb-3"></i>
+                            <p class="text-xl font-semibold">YouTube</p>
+                            <span class="text-sm text-gray-400">"Open YouTube"</span>
+                        </div>
+                        <div id="card-instagram" class="app-card p-6 rounded-lg text-center" onclick="openExternalApp('instagram')">
+                            <i class="fab fa-instagram text-5xl text-pink-500 mb-3"></i>
+                            <p class="text-xl font-semibold">Instagram</p>
+                            <span class="text-sm text-gray-400">"Open Instagram"</span>
+                        </div>
+                        <div id="card-mail" class="app-card p-6 rounded-lg text-center" onclick="openExternalApp('gmail')">
+                            <i class="fas fa-envelope text-5xl text-red-500 mb-3"></i>
+                            <p class="text-xl font-semibold">Gmail</p>
+                            <span class="text-sm text-gray-400">"Open Mail"</span>
+                        </div>
+                        <div id="card-amazon" class="app-card p-6 rounded-lg text-center" onclick="openExternalApp('amazon')">
+                            <i class="fab fa-amazon text-5xl text-orange-400 mb-3"></i>
+                            <p class="text-xl font-semibold">Amazon India</p>
+                            <span class="text-sm text-gray-400">"Open Amazon"</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // --- Calculator App Renderer & Logic ---
+
+        function renderCalculator() {
+            appContent.innerHTML = `
+                <div class="w-full max-w-sm">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold text-indigo-400">Scientific Calculator</h2>
+                        <button onclick="renderApp('home')" class="text-gray-400 hover:text-white transition duration-150">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="bg-gray-900 rounded-lg p-4 shadow-xl">
+                        <input id="calc-display" type="text" value="${calculatorDisplayValue}" readonly 
+                               class="w-full bg-transparent text-right text-4xl font-light mb-4 p-2 border-b-2 border-indigo-500 focus:outline-none">
+                        <div class="calculator-grid">
+                            
+                            <button class="calc-btn calc-accent" onclick="calcAction('clear')">C</button>
+                            <button class="calc-btn calc-accent" onclick="calcAction('backspace')"><i class="fas fa-backspace"></i></button>
+                            <button class="calc-btn calc-op" onclick="calcAction('operator', '^')">xʸ</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('function', 'sqrt(')">√</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('operator', '/')">/</button>
+                            
+                            <button class="calc-btn" onclick="calcAction('number', 7)">7</button>
+                            <button class="calc-btn" onclick="calcAction('number', 8)">8</button>
+                            <button class="calc-btn" onclick="calcAction('number', 9)">9</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('function', 'sin(')">sin</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('operator', '*')">*</button>
+
+                            <button class="calc-btn" onclick="calcAction('number', 4)">4</button>
+                            <button class="calc-btn" onclick="calcAction('number', 5)">5</button>
+                            <button class="calc-btn" onclick="calcAction('number', 6)">6</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('function', 'cos(')">cos</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('operator', '-')">-</button>
+
+                            <button class="calc-btn" onclick="calcAction('number', 1)">1</button>
+                            <button class="calc-btn" onclick="calcAction('number', 2)">2</button>
+                            <button class="calc-btn" onclick="calcAction('number', 3)">3</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('function', 'tan(')">tan</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('operator', '+')">+</button>
+                            
+                            <button class="calc-btn" onclick="calcAction('constant', 'PI')">π</button>
+                            <button class="calc-btn" onclick="calcAction('number', 0)">0</button>
+                            <button class="calc-btn" onclick="calcAction('decimal', '.')">.</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('parenthesis', '(')">(</button>
+                            <button class="calc-btn calc-op row-span-2" style="grid-row: span 2;" onclick="calcAction('equals')">=</button>
+                            
+                            <button class="calc-btn" onclick="calcAction('constant', 'E')">e</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('function', 'log(')">log</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('function', 'exp(')">eˣ</button>
+                            <button class="calc-btn calc-op" onclick="calcAction('parenthesis', ')')">)</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            // Attach calculator action handler globally for buttons
+            window.calcAction = calculatorAction;
+            updateCalculatorDisplay();
+        }
+        
+        function updateCalculatorDisplay() {
+            const display = document.getElementById('calc-display');
+            if (display) {
+                display.value = calculatorDisplayValue;
+            }
+        }
+
+        function cleanExpression(expr) {
+            // Replace common math functions/constants with Math. equivalents
+            let cleaned = expr.replace(/π/g, 'Math.PI');
+            cleaned = cleaned.replace(/e/g, 'Math.E');
+            cleaned = cleaned.replace(/sqrt\(/g, 'Math.sqrt(');
+            cleaned = cleaned.replace(/sin\(/g, 'Math.sin(');
+            cleaned = cleaned.replace(/cos\(/g, 'Math.cos(');
+            cleaned = cleaned.replace(/tan\(/g, 'Math.tan(');
+            cleaned = cleaned.replace(/log\(/g, 'Math.log('); // Natural logarithm (ln)
+            cleaned = cleaned.replace(/exp\(/g, 'Math.exp(');
+            // Handle power operator: 5^3 -> Math.pow(5,3)
+            // This is simple but robust enough for basic calc
+            // The regex is simplified for demonstration, a full scientific parser is complex
+            const powerMatch = cleaned.match(/(\d+|\)|\.)\^(\d+|\(|\.|\w+)/);
+            if (powerMatch) {
+                cleaned = cleaned.replace(powerMatch[0], `Math.pow(${powerMatch[1]},${powerMatch[2].replace('(', '')})`);
+            }
+            return cleaned;
+        }
+
+        function calculatorAction(type, value = '') {
+            if (type === 'clear') {
+                calculatorExpression = '';
+                calculatorDisplayValue = '0';
+            } else if (type === 'backspace') {
+                calculatorExpression = calculatorExpression.slice(0, -1);
+                calculatorDisplayValue = calculatorExpression || '0';
+            } else if (type === 'number' || type === 'operator' || type === 'decimal' || type === 'parenthesis') {
+                if (calculatorDisplayValue === '0' && type === 'number') {
+                    calculatorExpression = String(value);
+                } else {
+                    calculatorExpression += String(value);
+                }
+                calculatorDisplayValue = calculatorExpression;
+            } else if (type === 'function') {
+                calculatorExpression += value; // e.g., 'sin('
+                calculatorDisplayValue = calculatorExpression;
+            } else if (type === 'constant') {
+                 if (value === 'PI') {
+                    calculatorExpression += 'π';
+                } else if (value === 'E') {
+                    calculatorExpression += 'e';
+                }
+                calculatorDisplayValue = calculatorExpression;
+            } else if (type === 'equals') {
+                if (!calculatorExpression) return;
+                try {
+                    // Pre-process the expression for scientific functions
+                    const safeExpression = cleanExpression(calculatorExpression);
+                    let result = eval(safeExpression);
+                    
+                    if (typeof result === 'number' && !Number.isInteger(result)) {
+                        result = parseFloat(result.toFixed(10)); // Limit decimals
+                    }
+
+                    calculatorDisplayValue = String(result);
+                    calculatorExpression = String(result); // Set next calculation to start with result
+                } catch (e) {
+                    calculatorDisplayValue = 'Error';
+                    calculatorExpression = '';
+                    console.error('Calculation Error:', e);
+                }
+            }
+
+            updateCalculatorDisplay();
+        }
+
+        // --- Notes App Renderer & Logic ---
+
+        function renderNotes() {
+            // Load note content from session storage
+            const savedNote = sessionStorage.getItem(STORAGE_KEY_NOTES) || '';
+
+            appContent.innerHTML = `
+                <div class="w-full max-w-xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold text-yellow-500">My Notes</h2>
+                        <button onclick="renderApp('home')" class="text-gray-400 hover:text-white transition duration-150">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <textarea id="notes-input" 
+                              class="w-full h-80 p-4 bg-gray-700 text-white rounded-lg border border-yellow-500 focus:ring-2 focus:ring-yellow-500 focus:outline-none" 
+                              placeholder="Start typing your note here...">${savedNote}</textarea>
+                    <button onclick="saveNote()" 
+                            class="mt-4 w-full bg-yellow-600 hover:bg-yellow-700 text-gray-900 font-bold py-3 px-4 rounded-lg transition duration-200 shadow-md">
+                        <i class="fas fa-save mr-2"></i> Save Note (Saves locally)
+                    </button>
+                    <p id="notes-status" class="mt-2 text-sm text-gray-400 text-center"></p>
+                </div>
+            `;
+            // Attach save handler globally for button
+            window.saveNote = saveNote;
+        }
+
+        function saveNote() {
+            const noteInput = document.getElementById('notes-input');
+            const status = document.getElementById('notes-status');
+            if (noteInput) {
+                sessionStorage.setItem(STORAGE_KEY_NOTES, noteInput.value);
+                status.textContent = 'Note saved successfully to your browser session!';
+                status.classList.remove('text-gray-400', 'text-red-400');
+                status.classList.add('text-green-400');
+                setTimeout(() => status.textContent = '', 3000);
+            }
+        }
+
+        // --- Initial Load ---
+        window.onload = () => {
+            renderApp('home');
+        };
+    </script>
+</body>
+</html>
